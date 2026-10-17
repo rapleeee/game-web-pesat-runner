@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PESAT RUNNER 3D</title>
+    <link rel="stylesheet" href="style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <main id="game">
+      <section class="hud" aria-live="polite">
+        <span>SCORE <b id="score">0000</b></span>
+        <span>COINS <b id="coins">00</b></span>
+        <span>SPEED <b id="speed">1.0x</b></span>
+      </section>
+
+      <section id="menu" class="overlay">
+        <div class="panel">
+          <p class="eyebrow">LOW-POLY CITY RUN</p>
+          <h1>PESAT<br /><em>RUNNER 3D</em></h1>
+          <p class="tagline">Run &bull; Dodge &bull; Collect</p>
+          <button id="play-button" class="primary">PLAY GAME</button>
+          <button id="how-button" class="secondary">HOW TO PLAY</button>
+          <div id="instructions" class="instructions" hidden>
+            <p><kbd>A</kbd> <kbd>&larr;</kbd> Move left &nbsp; <kbd>D</kbd> <kbd>&rarr;</kbd> Move right</p>
+            <p><kbd>W</kbd> <kbd>&uarr;</kbd> <kbd>SPACE</kbd> Jump</p>
+            <p>Jump cones and barriers. Switch lanes to avoid crates.</p>
+          </div>
+          <p class="high-score">BEST SCORE <strong id="menu-high-score">0000</strong></p>
+        </div>
+      </section>
+
+      <section id="game-over" class="overlay" hidden>
+        <div class="panel">
+          <p class="eyebrow">RUN COMPLETE</p>
+          <h2>GAME OVER</h2>
+          <div class="results">
+            <p>SCORE <strong id="final-score">0000</strong></p>
+            <p>COINS <strong id="final-coins">00</strong></p>
+            <p>BEST <strong id="final-high-score">0000</strong></p>
+          </div>
+          <button id="again-button" class="primary">PLAY AGAIN</button>
+          <button id="menu-button" class="secondary">MAIN MENU</button>
+        </div>
+      </section>
+
+      <div id="bonus" aria-hidden="true">+10</div>
+      <div class="touch-controls" aria-label="Touch controls">
+        <button data-action="left" aria-label="Move left">&larr;</button>
+        <button data-action="jump" aria-label="Jump">&uarr;</button>
+        <button data-action="right" aria-label="Move right">&rarr;</button>
+      </div>
+    </main>
+    <script type="module" src="script.js"></script>
+  </body>
+</html>
