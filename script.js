@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
 const lanes = [-3, 0, 3];
 const playerZ = 4;
@@ -7,10 +8,12 @@ const clock = new THREE.Clock();
 const objects = [];
 const roadSegments = [];
 const environmentSegments = [];
-let camera, renderer, player, mixer;
+const cloudSegments = [];
+const buildingSlots = [];
+let camera, renderer, player, mixer, runAction;
 let lane = 1, verticalVelocity = 0, running = false, elapsed = 0, spawnTimer = 0;
 let score = 0, coins = 0, highScore = Number(localStorage.getItem("pesatRunnerHighScore")) || 0;
-let audioContext;
+let audioContext, musicTimer, musicStep = 0;
 
 const ui = {
   score: document.querySelector("#score"), coins: document.querySelector("#coins"),
@@ -37,6 +40,8 @@ function initScene() {
   createWorld();
   player = createPlayer();
   scene.add(player);
+  loadCharacter();
+  loadBuildings();
   addEventListener("resize", () => {
     camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight);
   });
@@ -50,8 +55,11 @@ function createWorld() {
 function createRoad() {
   const roadMaterial = new THREE.MeshStandardMaterial({ color: 0x30343b, roughness: 1 });
   const curbMaterial = new THREE.MeshStandardMaterial({ color: 0xe5e5e5 });
+  const grassMaterial = new THREE.MeshStandardMaterial({ color: 0x4fa84e, roughness: 1 });
   for (let z = -80; z <= 24; z += 12) {
     const segment = new THREE.Group();
+    const grass = new THREE.Mesh(new THREE.BoxGeometry(60, .16, 12.2), grassMaterial);
+    grass.position.y = -.25; grass.receiveShadow = true; segment.add(grass);
     const road = new THREE.Mesh(new THREE.BoxGeometry(10, 0.18, 12.2), roadMaterial);
     road.position.set(0, -0.1, 0); road.receiveShadow = true; segment.add(road);
     for (const x of [-5.35, 5.35]) {
@@ -77,6 +85,7 @@ function createEnvironment() {
       const height = 5 + (Math.abs(z * 7) % 7);
       const building = new THREE.Mesh(new THREE.BoxGeometry(5, height, 5), new THREE.MeshStandardMaterial({ color: side < 0 ? 0x4d88be : 0xdf7e58, flatShading: true }));
       building.position.set(side * 12, height / 2, 0); building.castShadow = true; segment.add(building);
+      buildingSlots.push({ segment, placeholder: building, side });
       const tree = new THREE.Group();
       const treeTrunk = new THREE.Mesh(new THREE.CylinderGeometry(.18, .25, 1.5, 6), trunk);
       const crown = new THREE.Mesh(new THREE.ConeGeometry(1.1, 2.8, 7), leaves);
@@ -88,6 +97,58 @@ function createEnvironment() {
     }
     segment.position.z = z; scene.add(segment); environmentSegments.push(segment);
   }
+  createClouds();
+}
+
+function createClouds() {
+  const cloudMaterial = new THREE.MeshStandardMaterial({ color: 0xf7fbff, flatShading: true });
+  for (let index = 0; index < 7; index++) {
+    const cloud = new THREE.Group();
+    [-1, 0, 1].forEach((part) => {
+      const puff = new THREE.Mesh(new THREE.DodecahedronGeometry(1.25, 0), cloudMaterial);
+      puff.scale.set(1.5, .6, .8);
+      puff.position.set(part * 1.45, Math.abs(part) * .15, 0);
+      cloud.add(puff);
+    });
+    cloud.position.set(index % 2 ? -10 : 11, 11 + (index % 3) * 2.2, -30 - index * 17);
+    scene.add(cloud); cloudSegments.push(cloud);
+  }
+}
+
+function loadBuildings() {
+  const assetPaths = [
+    "./assets/building-garage.glb",
+    "./assets/building-small-a.glb",
+    "./assets/building-small-b.glb",
+    "./assets/building-small-c.glb",
+    "./assets/building-small-d.glb",
+  ];
+  const loader = new GLTFLoader();
+  Promise.all(assetPaths.map((path) => loader.loadAsync(path)))
+    .then((gltfs) => {
+      const models = gltfs.map((gltf) => gltf.scene);
+      buildingSlots.forEach((slot, index) => {
+        const building = models[index % models.length].clone(true);
+        building.rotation.y = slot.side < 0 ? 0 : Math.PI;
+        building.traverse((part) => {
+          if (part.isMesh) {
+            part.castShadow = true;
+            part.receiveShadow = true;
+          }
+        });
+        const sourceBounds = new THREE.Box3().setFromObject(building);
+        building.scale.setScalar((6 + (index % 3) * 1.5) / (sourceBounds.max.y - sourceBounds.min.y));
+        const bounds = new THREE.Box3().setFromObject(building);
+        building.position.set(
+          slot.side * 12 - (bounds.min.x + bounds.max.x) / 2,
+          -bounds.min.y,
+          -(bounds.min.z + bounds.max.z) / 2,
+        );
+        slot.segment.remove(slot.placeholder);
+        slot.segment.add(building);
+      });
+    })
+    .catch((error) => console.warn("City building assets could not be loaded; using the built-in buildings.", error));
 }
 
 function createPlayer() {
@@ -113,6 +174,39 @@ function createPlayer() {
   group.userData.limbs = limbs;
   group.position.set(0, 0, playerZ);
   return group;
+}
+
+function loadCharacter() {
+  new GLTFLoader().load(
+    "./assets/robot-expressive.glb",
+    (gltf) => {
+      const model = gltf.scene;
+      model.rotation.y = Math.PI;
+      const originalBounds = new THREE.Box3().setFromObject(model);
+      const originalHeight = originalBounds.max.y - originalBounds.min.y;
+      model.scale.setScalar(3.25 / originalHeight);
+      const scaledBounds = new THREE.Box3().setFromObject(model);
+      model.userData.groundY = -scaledBounds.min.y;
+      model.position.set(player.position.x, model.userData.groundY + player.position.y, playerZ);
+      model.traverse((part) => {
+        if (part.isMesh) {
+          part.castShadow = true;
+          part.receiveShadow = true;
+        }
+      });
+      scene.remove(player);
+      player = model;
+      scene.add(player);
+      mixer = new THREE.AnimationMixer(player);
+      const runClip = gltf.animations.find(({ name }) => /running|walking/i.test(name));
+      if (runClip) {
+        runAction = mixer.clipAction(runClip);
+        runAction.play();
+      }
+    },
+    undefined,
+    (error) => console.warn("Animated character asset could not be loaded; using the built-in character.", error),
+  );
 }
 
 function createObstacle(type, targetLane) {
@@ -180,10 +274,11 @@ function updatePlayer(delta) {
   if (player.position.y === 0) verticalVelocity = 0;
   player.rotation.z = THREE.MathUtils.damp(player.rotation.z, -(lanes[lane] - player.position.x) * .11, 8, delta);
   const cycle = elapsed * (9 + speedMultiplier() * 2);
-  player.userData.limbs.forEach(({ arm, leg, shoe, phase }) => {
+  player.userData.limbs?.forEach(({ arm, leg, shoe, phase }) => {
     const swing = Math.sin(cycle * phase) * .65;
     arm.rotation.x = swing; leg.rotation.x = -swing; shoe.rotation.x = -swing * .2;
   });
+  if (mixer) mixer.update(delta);
 }
 
 function speedMultiplier() { return Math.min(2.4, 1 + Math.floor(elapsed / 20) * .16); }
@@ -211,6 +306,10 @@ function updateWorld(delta) {
     segment.position.z += movement;
     if (segment.position.z > 25) segment.position.z -= 99;
   });
+  cloudSegments.forEach((cloud) => {
+    cloud.position.z += movement * .2;
+    if (cloud.position.z > 25) cloud.position.z -= 119;
+  });
 }
 
 function checkCollisions(object, index) {
@@ -237,21 +336,48 @@ function showBonus() {
   requestAnimationFrame(() => ui.bonus.classList.add("show"));
 }
 
-function playTone(frequency, duration, wave) {
+function getAudioContext() {
   if (!audioContext) audioContext = new AudioContext();
+  if (audioContext.state === "suspended") audioContext.resume();
+  return audioContext;
+}
+
+function playTone(frequency, duration, wave, volume = .06) {
+  const context = getAudioContext();
   const oscillator = audioContext.createOscillator(), gain = audioContext.createGain();
   oscillator.type = wave; oscillator.frequency.value = frequency;
-  gain.gain.setValueAtTime(.06, audioContext.currentTime); gain.gain.exponentialRampToValueAtTime(.001, audioContext.currentTime + duration);
-  oscillator.connect(gain).connect(audioContext.destination); oscillator.start(); oscillator.stop(audioContext.currentTime + duration);
+  gain.gain.setValueAtTime(volume, context.currentTime); gain.gain.exponentialRampToValueAtTime(.001, context.currentTime + duration);
+  oscillator.connect(gain).connect(context.destination); oscillator.start(); oscillator.stop(context.currentTime + duration);
+}
+
+function startMusic() {
+  if (musicTimer) return;
+  getAudioContext();
+  const bassline = [110, 110, 147, 110, 131, 131, 165, 147];
+  const melody = [440, 0, 523, 0, 587, 0, 523, 659];
+  const playStep = () => {
+    const step = musicStep++ % bassline.length;
+    playTone(bassline[step], .13, "triangle", .026);
+    if (step % 2 === 0) playTone(62, .07, "sine", .05);
+    if (melody[step]) playTone(melody[step], .1, "square", .018);
+  };
+  playStep();
+  musicTimer = setInterval(playStep, 150);
+}
+
+function stopMusic() {
+  if (!musicTimer) return;
+  clearInterval(musicTimer);
+  musicTimer = undefined;
 }
 
 function startGame() {
-  resetGame(); running = true; ui.menu.hidden = true; ui.over.hidden = true; clock.getDelta();
+  resetGame(); running = true; startMusic(); ui.menu.hidden = true; ui.over.hidden = true; clock.getDelta();
 }
 
 function endGame() {
   if (!running) return;
-  running = false; playTone(110, .45, "sawtooth");
+  running = false; stopMusic(); playTone(110, .45, "sawtooth");
   highScore = Math.max(highScore, score); localStorage.setItem("pesatRunnerHighScore", highScore);
   ui.finalScore.textContent = String(score).padStart(4, "0");
   ui.finalCoins.textContent = String(coins).padStart(2, "0");
@@ -263,7 +389,8 @@ function endGame() {
 function resetGame() {
   objects.forEach((object) => scene.remove(object)); objects.length = 0;
   lane = 1; elapsed = 0; spawnTimer = .8; score = 0; coins = 0; verticalVelocity = 0;
-  player.position.set(0, 0, playerZ); player.rotation.z = 0; updateScore();
+  player.position.set(0, player.userData.groundY || 0, playerZ); player.rotation.z = 0; updateScore();
+  if (runAction) runAction.reset().play();
 }
 
 function animate() {
